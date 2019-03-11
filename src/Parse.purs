@@ -4,8 +4,10 @@ import Prelude
 
 import Control.Alternative ((<|>))
 import Control.Lazy (fix)
+import Control.Monad.Error.Class (throwError)
 import Data.Array (fold)
 import Data.Array as Array
+import Data.Either (Either(..))
 import Data.Foldable (class Foldable)
 import Data.List (List(..), many, (:))
 import Data.List.Types (NonEmptyList(..))
@@ -13,11 +15,18 @@ import Data.Maybe (Maybe(..))
 import Data.NonEmpty (NonEmpty(..))
 import Data.Number as Number
 import Data.String.CodeUnits (fromCharArray, singleton, toCharArray)
+import Error (ThrowsError)
+import Error as Error
 import LispVal (LispVal(..))
-import Text.Parsing.Parser (Parser, failWithPosition, position)
+import Text.Parsing.Parser (Parser, failWithPosition, position, runParser)
 import Text.Parsing.Parser.Combinators (endBy, sepBy, skipMany1, try)
 import Text.Parsing.Parser.String (char, noneOf, oneOf, string)
 import Text.Parsing.Parser.Token (digit, letter, space)
+
+readExpr :: String -> ThrowsError LispVal
+readExpr input = case runParser input parseExpr of
+  Left err -> throwError $ Error.Parser err
+  Right val -> pure val
 
 parseExpr :: Parser String LispVal
 parseExpr =  fix \_ ->
