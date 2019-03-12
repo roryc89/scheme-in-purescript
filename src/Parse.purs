@@ -15,9 +15,8 @@ import Data.Maybe (Maybe(..))
 import Data.NonEmpty (NonEmpty(..))
 import Data.Number as Number
 import Data.String.CodeUnits (fromCharArray, singleton, toCharArray)
-import Error (ThrowsError)
-import Error as Error
-import LispVal (LispVal(..))
+import LispVal as LispVal
+import LispVal (LispVal(..), ThrowsError)
 import Text.Parsing.Parser (Parser, failWithPosition, position, runParser)
 import Text.Parsing.Parser.Combinators (endBy, sepBy, skipMany1, try)
 import Text.Parsing.Parser.String (char, noneOf, oneOf, string)
@@ -25,7 +24,7 @@ import Text.Parsing.Parser.Token (digit, letter, space)
 
 readExpr :: String -> ThrowsError LispVal
 readExpr input = case runParser input parseExpr of
-  Left err -> throwError $ Error.Parser err
+  Left err -> throwError $ LispVal.Parser err
   Right val -> pure val
 
 parseExpr :: Parser String LispVal

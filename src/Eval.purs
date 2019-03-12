@@ -4,27 +4,28 @@ import Prelude
 
 import Control.Alt ((<|>))
 import Control.Monad.Error.Class (catchError, throwError)
+import Data.Array as Array
 import Data.Either (Either(..))
-import Data.List (List(..), all, length, zip, (:))
-import Data.Maybe (maybe)
+import Data.List (List(..), all, drop, last, length, zip, (:))
+import Data.Maybe (Maybe(..), fromMaybe)
 import Data.NonEmpty (NonEmpty(..), foldl1)
 import Data.Traversable (traverse)
-import Data.Tuple (Tuple(..), lookup)
+import Data.Tuple (Tuple(..))
+import Effect (Effect)
 import Effect.Class (liftEffect)
 import Effect.Class.Console (log)
 import Effect.Ref as Ref
-import Error (LispError(..), ThrowsError)
-import LispVal (LispVal(..))
-import Variable (EffThrowsError, Env, defineVar, getVar, liftThrows, setVar, showEnv)
-
+import LispVal (EffThrowsError, Env, LispError(..), LispVal(..), ThrowsError, bindVars, defineVar, getVar, liftThrows, nullEnv, setVar, showEnv, showVal)
+--
 eval :: Env -> LispVal -> EffThrowsError LispVal
-eval env val@(String _) = pure val
-eval env val@(Number _) = pure val
-eval env val@(Bool _) = pure val
-eval env (Atom id) = getVar env id
-eval env (List (Atom "quote" : val : Nil)) = pure val
+eval env = case _ of
+  val@(String _) -> pure val
+  val@(Number _) -> pure val
+  val@(Bool _) -> pure val
+  (Atom id) -> getVar env id
+  (List (Atom "quote" : val : mempty)) -> pure val
 
-eval env (List (Atom "if" : pred : conseq : alt : Nil)) =
+  (List (Atom "if" : pred : conseq : alt : mempty)) ->
      do
        result <- eval env pred
        case result of
@@ -32,27 +33,81 @@ eval env (List (Atom "if" : pred : conseq : alt : Nil)) =
          Bool false -> eval env alt
          _ -> throwError $ TypeMismatch "Boolean" result
 
-eval env (List (Atom "showEnv" : Nil)) = do
+  (List (Atom "showEnv" : mempty)) -> do
      env_ <- liftEffect $ Ref.read env
      str_ <- liftEffect $ showEnv env_
      log str_
-     pure (List Nil)
+     pure (List mempty)
 
-eval env (List (Atom "set!" : Atom var : form : Nil)) =
+  (List (Atom "set!" : Atom var : form : mempty)) ->
      eval env form >>= setVar env var
 
-eval env (List (Atom "define" : Atom var : form : Nil)) =
+  (List (Atom "define" : Atom var : form : mempty)) ->
      eval env form >>= defineVar env var
 
-eval env (List (Atom func : args)) = traverse (eval env) args >>= liftThrows <<< applyLisp func
-eval env badForm = throwError $ BadSpecialForm "Unrecognized special form" badForm
+  (List (Atom "define" : List (Atom var : params) : body)) ->
+     makeNormalFunc env params body >>= defineVar env var
 
-applyLisp :: String -> List LispVal -> ThrowsError LispVal
-applyLisp func args =
-  maybe
-    (throwError $ NotFunction "Unrecognized primitive function args" func)
-    ((#) args)
-    (lookup func primitives)
+  (List (Atom "define" : DottedList (Atom var : params) varargs : body)) ->
+     makeVarArgs varargs env params body >>= defineVar env var
+
+  (List (Atom "lambda" : List params : body)) ->
+     makeNormalFunc env params body
+
+  (List (Atom "lambda" : DottedList params varargs : body)) ->
+     makeVarArgs varargs env params body
+
+  (List (Atom "lambda" : varargs@(Atom _) : body)) ->
+     makeVarArgs varargs env mempty body
+
+  (List (function : args)) -> do
+     func <- eval env function
+     argVals <- traverse (eval env) args
+     applyLisp func argVals
+
+  badForm -> throwError $ BadSpecialForm "Unrecognized special form" badForm
+  where
+    makeFunc vararg closure params body = pure $ Func {params:(map showVal params), vararg, body, closure}
+    makeNormalFunc = makeFunc Nothing
+    makeVarArgs = makeFunc <<< Just <<< showVal
+
+
+applyLisp :: LispVal -> List LispVal -> EffThrowsError LispVal
+applyLisp (PrimitiveFunc func) args = liftThrows $ func args
+
+applyLisp (Func {params, vararg, body, closure}) args =
+
+  if num params /= num args && vararg == Nothing then
+    throwError $ NumArgs (num params) args
+  else
+    ((zip >>> map Array.fromFoldable) params args
+    # bindVars closure
+    # liftEffect
+    )
+    >>= bindVarArgs vararg
+    >>= evalBody
+
+  where
+    remainingArgs = drop (length params) args
+    num = length
+    evalBody env = map (last >>> fromMaybe (List mempty)) $ traverse (eval env) body
+    bindVarArgs arg env = case arg of
+        Just argName -> liftEffect $ bindVars env [ Tuple argName (List $ remainingArgs)]
+        Nothing -> pure env
+
+applyLisp func args = liftThrows $
+  -- maybe
+    (throwError $ NotFunction "Unrecognized primitive function args" (show func))
+    -- ((#) args)
+    -- (lookup func primitives)
+primitiveBindings :: Effect Env
+primitiveBindings =
+  nullEnv
+  >>= (flip bindVars $ map makePrimitiveFunc primitives)
+  where
+    makePrimitiveFunc = map PrimitiveFunc
+
+
 
 primitives :: Array (Tuple String (List LispVal -> ThrowsError LispVal))
 primitives =

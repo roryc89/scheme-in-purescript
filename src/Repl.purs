@@ -5,15 +5,14 @@ import Prelude
 import Effect (Effect)
 import Effect.Class (liftEffect)
 import Effect.Console (log)
-import Eval (eval)
+import Eval (eval, primitiveBindings)
+import LispVal (Env, liftThrows, runEffThrows)
 import Node.SimpleRepl (Repl, putStrLn, readLine, simpleRepl)
 import Parse (readExpr)
-import Variable (Env, liftThrows, nullEnv, runEffThrows)
 
 evalString ::  Env -> String -> Repl String
 evalString env expr =
   liftEffect $ runEffThrows $ liftM1 show $ (liftThrows $ readExpr expr) >>= eval env
-  -- pure $ extractValue $ trapError (liftM1 show $ readExpr expr >>= eval env)
 
 evalAndPrint :: Env -> String -> Repl Unit
 evalAndPrint env expr = evalString env expr >>= putStrLn
@@ -28,5 +27,5 @@ until_ pred prompt action = do
 runRepl :: Effect Unit
 runRepl = do
   log "enter quit to exit"
-  startEnv <- nullEnv
+  startEnv <- primitiveBindings
   simpleRepl (until_ ((==) "quit") readLine (evalAndPrint startEnv))
