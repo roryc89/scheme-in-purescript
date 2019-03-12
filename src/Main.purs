@@ -5,13 +5,11 @@ import Prelude
 import Data.Array ((!!))
 import Data.Maybe (Maybe(..))
 import Effect (Effect)
-import Effect.Class.Console (logShow)
 import Effect.Console (log)
-import Error (extractValue, trapError)
-import Eval (eval)
 import Node.Process (argv)
-import Parse (readExpr)
-import Repl (runRepl)
+import Node.SimpleRepl (simpleRepl)
+import Repl (evalAndPrint, runRepl)
+import Variable (nullEnv)
 
 main :: Effect Unit
 main = do
@@ -20,5 +18,9 @@ main = do
     Nothing -> runRepl
     Just input -> do
       log $ "input: " <> input
-      evaled <- pure $ liftM1 show $ readExpr input >>= eval
-      logShow $ extractValue $ trapError evaled
+      runOne input
+
+runOne :: String -> Effect Unit
+runOne expr = do
+  startEnv <- nullEnv
+  simpleRepl $ evalAndPrint startEnv expr

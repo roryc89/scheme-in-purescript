@@ -10,24 +10,42 @@ import Data.Maybe (maybe)
 import Data.NonEmpty (NonEmpty(..), foldl1)
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(..), lookup)
+import Effect.Class (liftEffect)
+import Effect.Class.Console (log)
+import Effect.Ref as Ref
 import Error (LispError(..), ThrowsError)
 import LispVal (LispVal(..))
+import Variable (EffThrowsError, Env, defineVar, getVar, liftThrows, setVar, showEnv)
 
-eval :: LispVal -> ThrowsError LispVal
-eval val@(String _) = pure val
-eval val@(Number _) = pure val
-eval val@(Bool _) = pure val
-eval (List (Atom "quote" : val : Nil)) = pure val
-eval (List (Atom "if" : pred : conseq : alt : Nil)) =
+eval :: Env -> LispVal -> EffThrowsError LispVal
+eval env val@(String _) = pure val
+eval env val@(Number _) = pure val
+eval env val@(Bool _) = pure val
+eval env (Atom id) = getVar env id
+eval env (List (Atom "quote" : val : Nil)) = pure val
+
+eval env (List (Atom "if" : pred : conseq : alt : Nil)) =
      do
-       result <- eval pred
+       result <- eval env pred
        case result of
-         Bool true  -> eval conseq
-         Bool false -> eval alt
+         Bool true  -> eval env conseq
+         Bool false -> eval env alt
          _ -> throwError $ TypeMismatch "Boolean" result
 
-eval (List (Atom func : args)) = traverse eval args >>= applyLisp func
-eval badForm = throwError $ BadSpecialForm "Unrecognized special form" badForm
+eval env (List (Atom "showEnv" : Nil)) = do
+     env_ <- liftEffect $ Ref.read env
+     str_ <- liftEffect $ showEnv env_
+     log str_
+     pure (List Nil)
+
+eval env (List (Atom "set!" : Atom var : form : Nil)) =
+     eval env form >>= setVar env var
+
+eval env (List (Atom "define" : Atom var : form : Nil)) =
+     eval env form >>= defineVar env var
+
+eval env (List (Atom func : args)) = traverse (eval env) args >>= liftThrows <<< applyLisp func
+eval env badForm = throwError $ BadSpecialForm "Unrecognized special form" badForm
 
 applyLisp :: String -> List LispVal -> ThrowsError LispVal
 applyLisp func args =
